@@ -58,6 +58,7 @@ def test_got_TimeSeriesData():
 def test_got_ExposureNotificationTimers():
 
     space_map = Map(1, 2)
+    space_map.place_agent(0)
     time_series_data = TimeSeriesData()
     timers = ExposureNotificationTimers(ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC, guid=0, time_series_data=time_series_data, space_map=space_map)
 
@@ -70,14 +71,21 @@ def test_got_ExposureNotificationTimers():
     assert l >= MIN_ADVERTISINGS and l <= MAX_ADVERTISINGS
 
 def test_got_run_game():
-    trackables = run_game(30, 3, False, ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC)
-    assert len(trackables) == 30
-    assert trackables[0] >= .99999
+    for triangulated in [False, True]:
+        trackables = run_game(n_simulation_runs=1,
+                            cluster_size=3,
+                            triangulated=triangulated,
+                            timer_type=ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC)
+        assert len(trackables) >= 0 and len(trackables) < 3
+        assert trackables[0] >= .99999
 
 def test_got_render_game():
     pass
 
 def test_got_enriched_graph():
+    pass
+
+def test_elasticsearch():
     pass
 
 def test_deep_got():

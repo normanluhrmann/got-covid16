@@ -23,6 +23,13 @@ STEP_RESOLUTION_MS = 100
 # number of steps for 1 square map movement
 MOVEMENT_STEPS_PER_SQUARE = 10
 
+# track last map step trigger
+map_step = 0
+
+# replay data is global
+action_list = deque()
+movement_list = deque()
+
 class ExposureNotificationTimerTypes(Enum):
     """Timer setup according to Google/Apple specifications or specific Android test"""
     EXPOSURE_NOTIFICATION_TIMER_SPEC = 1
@@ -49,10 +56,11 @@ class Map:
 
         x = y = None
         while x is None and y is None:
-            x = random.randint(0, self._side_length)
-            y = random.randint(0, self._side_length)
+            x = random.randint(0, self._side_length - 1)
+            y = random.randint(0, self._side_length - 1)
 
-            if self._map[x,y] is None:
+            if self._map[x][y] is None:
+                self._map[x][y] = agent_id
                 self._placed += 1
             else:
                 x = y = None
@@ -70,13 +78,15 @@ class Map:
 
         for x in range(self._side_length):
             for y in range(self._side_length):
-                if self._map[x,y] == agent_id:
+                if self._map[x][y] == agent_id:
                     return x, y
 
         raise ValueError(f"unable to locate agent {agent_id}")
 
     def step(self):
         """Agents move in horizontal or diagonal direction for 1 square every movement steps"""
+
+        global movement_list
 
         agent_ids = set([a for r in self._map for a in r if not a is None])
         agent_slice = MOVEMENT_STEPS_PER_SQUARE / self._cluster_size
@@ -86,12 +96,21 @@ class Map:
                 x, y = self.locate_agent(agent_id)
                 dx, dy = random.randrange(-1, 2), random.randrange(-1, 2)
 
-                if self._map[x + dx, y + dy] is None:
-                    self._map[x, y] = None
-                else:
-                    self._map[x, y] = self._map[x + dx, y + dy]
+                if (x + dx) >= len(self._map[0]) or \
+                   (y + dy) >= len(self._map):
+                   
+                   continue;
 
-                self._map[x + dx, y + dy] = agent_id
+                if self._map[x + dx][y + dy] is None:
+                    self._map[x][y] = None
+                    movement_list += [(self._step, x, y, None)]
+                else:
+                    source = self._map[x + dx][y + dy]
+                    self._map[x][y] = source
+                    movement_list += [(self._step, x, y, source)]
+
+                self._map[x + dx][y + dy] = agent_id
+                movement_list += [(self._step, x + dx, y + dy, agent_id)]
 
         self._step += 1
 
@@ -118,9 +137,7 @@ class TimeSeriesData:
                                         # unique at once - at that point it can be considered a unique
                                         # rotation indirectly carrying over
 
-        action_list = []
-
-        for step, mac, rpi, x, y in self.data + [(99999999, None, None)]:
+        for step, mac, rpi, x, y in self.data + [(99999999, None, None, -1, -1)]:
             if not (mac, rpi) is (None, None): # skip processing for last rerun to cleanup deque
 
                 if (mac, rpi) not in g.nodes.items():
@@ -135,7 +152,7 @@ class TimeSeriesData:
 
                     g.add_edge((mac, prev_rpi), (mac, rpi))
 
-                    action_list += [(step, 'traverse_rpi', x, y)]
+                    action_list.append((step, 'traverse_rpi', x, y))
 
                 # direct traversals via mac
                 elif rpi in traversal_lut_rpi:
@@ -144,13 +161,13 @@ class TimeSeriesData:
                     del traversal_lut_mac[prev_mac]
                     del traversal_lut_rpi[rpi]
 
-                    action_list += [(step, 'traverse_mac', x, y)]
+                    action_list.append((step, 'traverse_mac', x, y))
 
                 # indirect lookup via temporal rotation uniqueness
                 else:
                     temporal_lookahead.append((step, mac, rpi, x, y))
 
-                    action_list += [(step, 'temp_lost', x, y)]
+                    action_list.append((step, 'temp_lost', x, y))
 
             shift_n = 0
 
@@ -159,13 +176,15 @@ class TimeSeriesData:
                     (step - temporal_lookahead[0][0]) >= (2 * advertising_interval) and \
                     (step - temporal_lookahead[1][0]) >= advertising_interval:
 
+                prev_action_list_len = len(action_list)
+
                 recover_src = recover_dst = None               
                 if (temporal_lookahead[1][0] - temporal_lookahead[0][0]) >= advertising_interval:
                     # temporal uniqueness
                     recover_src = (temporal_lookahead[0][1], temporal_lookahead[0][2])
                     recover_dst = (temporal_lookahead[1][1], temporal_lookahead[1][2])
 
-                    action_list += [(step, 'recover_temporal', x, y)]
+                    action_list.append((step, 'recover_temporal', x, y))
                 else:
                     # spatial uniqueness
                     x0, y0 = tuple(temporal_lookahead[0][3:5])
@@ -175,29 +194,31 @@ class TimeSeriesData:
                         recover_src = (temporal_lookahead[0][1], temporal_lookahead[0][2])
                         recover_dst = (temporal_lookahead[1][1], temporal_lookahead[1][2])
 
-                        action_list += [(temporal_lookahead[1][0], 'recover_spatial', x1, y1, x0, y0)]
+                        action_list.append((temporal_lookahead[1][0], 'recover_spatial', x1, y1, x0, y0))
 
-                if not (recover_src is None and recover_dst is None):
-
+                if not (recover_src is None or recover_dst is None):
                     g.add_edge(recover_src, recover_dst)
                     temporal_lookahead.popleft()
                     temporal_lookahead.popleft()
 
 
-            # lost track on oldest stale items if not already used in processing
-            # (must be too narrow to neighbor)
-            while len(temporal_lookahead) >= shift_n and \
-                (step - temporal_lookahead[shift_n][0]) >= (2 * advertising_interval):
-                
-                shift_n += 1
+                # lost track on oldest stale items if not already used in processing
+                # (must be too narrow to neighbor)
+                while len(temporal_lookahead) >= shift_n and \
+                    (step - temporal_lookahead[shift_n][0]) >= (2 * advertising_interval):
+                    
+                    shift_n += 1
 
-                x, y = tuple(temporal_lookahead[0][3:5])
-                action_list += [(temporal_lookahead[1][0], 'track_lost', x, y)]
+                    x, y = tuple(temporal_lookahead[0][3:5])
+                    action_list.append((temporal_lookahead[1][0], 'track_lost', x, y))
+                
+                for _ in range(shift_n):
+                    temporal_lookahead.popleft()
             
-            for _ in range(shift_n):
-                temporal_lookahead.popleft()
-        
-            lost_tracks += shift_n
+                lost_tracks += shift_n
+
+                if prev_action_list_len == len(action_list):
+                    break; # no action available, break processing
 
             # save lut for following ref cycles
             traversal_lut_mac[mac] = rpi
@@ -228,6 +249,8 @@ class ExposureNotificationTimers:
         }[timer_type](self)
 
     def step(self):
+        global map_step
+
         """Execute simulation step"""
         if self._step % self.mac_rotate_step == 0:
             self._rotate_mac()
@@ -237,6 +260,10 @@ class ExposureNotificationTimers:
             self._advertise()
         
         self._step += 1
+
+        if map_step < self._step:
+            self._space_map.step()
+            map_step += 1
 
     def _gen_EXPOSURE_NOTIFICATION_TIMER_SPEC(self):
         """Generate timers according to Google/Apple spec"""
@@ -292,10 +319,9 @@ class DeviceOwnerAgent(Agent):
 
 class DeviceClusterModel(Model):
     """A model with a single or multiple beacons observing a device cluster of given size"""
-    def __init__(self, cluster_size: int, timer_type: ExposureNotificationTimerTypes, triangulated, time_series_data: TimeSeriesData, space_map: Map):
+    def __init__(self, cluster_size: int, timer_type: ExposureNotificationTimerTypes, time_series_data: TimeSeriesData, space_map: Map):
         self.num_agents = cluster_size
         self.schedule = RandomActivation(self)
-        self.schedule.add(space_map) # map needs step activation for movement
         for i in range(self.num_agents):
             space_map.place_agent(i)
             timers = ExposureNotificationTimers(timer_type, guid=i, time_series_data=time_series_data, space_map=space_map)
@@ -329,10 +355,12 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
     model = None
     time_series_data = None
     for _ in range(0, n_simulation_runs):
+        action_list = deque()
+        movement_list = deque()
+
         time_series_data = TimeSeriesData()
         model = DeviceClusterModel(cluster_size,
                                 timer_type=timer_type,
-                                triangulated=triangulated,
                                 time_series_data=time_series_data,
                                 space_map=space_map)
 
@@ -347,6 +375,14 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
 
 def render_game(n_frames: int, frame_time_steps: int, cluster_size: int, triangulated: bool, timer_type: ExposureNotificationTimerTypes):
     """Render game with parameters, returns trackable fraction of devices per run"""
+
+    aidx = 0
+    midx = 0
+    #for frame_no in range(n_frames):
+    #    frame_offset = frame_no * frame_time_steps
+    #    if len(action_list) > 0 and frame_offset > action_list[0]:
+    #action_list
+    #movement_list
 
     #  https://eli.thegreenplace.net/2016/drawing-animated-gifs-with-matplotlib/
     #
