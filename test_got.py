@@ -1,6 +1,6 @@
 import uuid
 import math
-from gameoftrackers import TimeSeriesData, ExposureNotificationTimers, ExposureNotificationTimerTypes, SIMULATION_RUN_STEPS, DeviceOwnerAgent, run_game, Map
+from gameoftrackers import TimeSeriesData, ExposureNotificationTimers, ExposureNotificationTimerTypes, SIMULATION_RUN_STEPS, DeviceOwnerAgent, run_game, render_game, Map
 
 def test_got_TimeSeriesData():
 
@@ -76,16 +76,18 @@ def test_got_run_game():
                             cluster_size=3,
                             triangulated=triangulated,
                             timer_type=ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC)
-        assert len(trackables) >= 0 and len(trackables) < 3
+        assert len(trackables) >= 0 and len(trackables) <= 3
         assert trackables[0] >= .99999
 
 def test_got_render_game():
-    pass
+    render_game(n_frames=90, frame_time_steps=400, cluster_size=3)
 
 def test_got_enriched_graph():
+    # FIXME extract tracking pattern as digraph of mac/rpi tuples
     pass
 
 def test_elasticsearch():
+    # FIXME implement Elasticsearch data source for real-world testing
     pass
 
 def test_deep_got():

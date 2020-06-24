@@ -7,6 +7,11 @@ from collections import deque
 import random
 import math
 import uuid
+import pprint
+import tempfile
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 # in 10th of seconds
 SIMULATION_RUN_STEPS = 9000
@@ -27,6 +32,7 @@ MOVEMENT_STEPS_PER_SQUARE = 10
 map_step = 0
 
 # replay data is global
+map_movie = list ()
 action_list = deque()
 movement_list = deque()
 
@@ -83,11 +89,15 @@ class Map:
 
         raise ValueError(f"unable to locate agent {agent_id}")
 
+    def __str__(self):
+        return pprint.pformat([self._map[i, j] for i in self._map for j in self._map[i]])
+
     def step(self):
         """Agents move in horizontal or diagonal direction for 1 square every movement steps"""
 
-        global movement_list
+        global movement_list, map_movie
 
+        has_moved = False
         agent_ids = set([a for r in self._map for a in r if not a is None])
         agent_slice = MOVEMENT_STEPS_PER_SQUARE / self._cluster_size
         for agent_id in agent_ids:
@@ -99,7 +109,9 @@ class Map:
                 if (x + dx) >= len(self._map[0]) or \
                    (y + dy) >= len(self._map):
                    
-                   continue;
+                   continue
+
+                has_moved = True
 
                 if self._map[x + dx][y + dy] is None:
                     self._map[x][y] = None
@@ -112,8 +124,10 @@ class Map:
                 self._map[x + dx][y + dy] = agent_id
                 movement_list += [(self._step, x + dx, y + dy, agent_id)]
 
-        self._step += 1
+        if has_moved:
+            map_movie += [(self._step, str(self._map))]
 
+        self._step += 1
 
 TimeSeriesDatum = Tuple[int, str, str, int, int]
 
@@ -218,7 +232,7 @@ class TimeSeriesData:
                 lost_tracks += shift_n
 
                 if prev_action_list_len == len(action_list):
-                    break; # no action available, break processing
+                    break # no action available, break processing
 
             # save lut for following ref cycles
             traversal_lut_mac[mac] = rpi
@@ -373,18 +387,86 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
 
     return trackables
 
-def render_game(n_frames: int, frame_time_steps: int, cluster_size: int, triangulated: bool, timer_type: ExposureNotificationTimerTypes):
+def render_game(n_frames: int, frame_time_steps: int, cluster_size: int):
     """Render game with parameters, returns trackable fraction of devices per run"""
 
-    aidx = 0
-    midx = 0
-    #for frame_no in range(n_frames):
-    #    frame_offset = frame_no * frame_time_steps
-    #    if len(action_list) > 0 and frame_offset > action_list[0]:
-    #action_list
-    #movement_list
+    global map_movie
 
-    #  https://eli.thegreenplace.net/2016/drawing-animated-gifs-with-matplotlib/
+    fig, ax = plt.subplots()
+    fig.set_tight_layout(True)
+
+    def chunks(s, n):
+        for start in range(0, len(s), n):
+            yield s[start:start+n]
+
+    def do_render(ax, data, step, prev_step, is_event: bool):
+        ax.cla()
+        ax.set_title("step {}".format(step))
+        ax.imshow(data, cmap='hot', interpolation='nearest')
+
+        EVENT_DURATION = 300
+        if is_event:
+            pause_duration = EVENT_DURATION
+        else:
+            pause_duration = (step - prev_step) / 10 - EVENT_DURATION
+
+        plt.pause(pause_duration)
+
+    aidx = 0
+    prev_step = None
+    for step, map_str in map_movie:
+        cmap = chunks(map_str, math.sqrt(len(map_str)))
+        if aidx in action_list:
+            if action_list[aidx][0] < step:
+
+                frame_offset = step * frame_time_steps
+                if len(action_list) > 0 and frame_offset > action_list[0]:
+
+                    dmap = list.copy(cmap)
+
+                    def traverse_rpi(x, y):
+                        dmap[x][y] = '*'
+                        pass
+                    
+                    def traverse_mac(x, y):
+                        dmap[x][y] = '#'
+                        pass
+
+                    def temp_lost(x, y):
+                        dmap[x][y] = '?'
+                        pass
+
+                    def recover_temporal(x, y):
+                        dmap[x][y] = 'T'
+                        pass
+
+                    def recover_spatial(x0, y0, x1, y1):
+                        dmap[x0][y0] = 'S'
+                        dmap[x1][y1] = 'S'
+                        pass
+
+                    def track_lost(x, y):
+                        dmap[x][y] = ' '
+                        pass
+
+                    {
+                        'traverse_rpi': traverse_rpi,
+                        'traverse_mac': traverse_mac,
+                        'temp_lost': temp_lost,
+                        'recover_temporal': recover_temporal,
+                        'recover_spatial': recover_spatial,
+                        'track_lost': track_lost
+                    }[action_list[0][1]](*action_list[0][2:])
+
+                    do_render(ax, dmap, step, prev_step, is_event=True)
+                    do_render(ax, cmap, step, prev_step, is_event=False)
+
+                    aidx += 1
+                    prev_step = step
+
+    gif_file = tempfile.mktemp(suffix='.gif', prefix='got-animation')
+    plt.show()
+
     #
     # non-spatial (globals)
     #
