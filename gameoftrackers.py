@@ -365,10 +365,8 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
     else:
         assert False
 
-    space_map = Map(cluster_size, cluster_size + 1)
-    model = None
-    time_series_data = None
     for _ in range(0, n_simulation_runs):
+        space_map = Map(cluster_size, cluster_size + 1)
         time_series_data = TimeSeriesData()
         model = DeviceClusterModel(cluster_size,
                                 timer_type=timer_type,

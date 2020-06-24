@@ -1,6 +1,8 @@
+from gameoftrackers import TimeSeriesData, ExposureNotificationTimers, ExposureNotificationTimerTypes, SIMULATION_RUN_STEPS, DeviceOwnerAgent, run_game, render_game, Map
 import uuid
 import math
-from gameoftrackers import TimeSeriesData, ExposureNotificationTimers, ExposureNotificationTimerTypes, SIMULATION_RUN_STEPS, DeviceOwnerAgent, run_game, render_game, Map
+import matplotlib.pyplot as plt
+import numpy as np
 
 def test_got_TimeSeriesData():
 
@@ -95,3 +97,48 @@ def test_deep_got():
     # monte carlo? score adjustments?
     # just spec
     pass
+
+
+def test_ipynb():
+    fig, ax = plt.subplots()
+    fig.set_tight_layout(True)
+    n_simulation_runs = 10
+    max_cluster = 2
+    n_total = len(list(ExposureNotificationTimerTypes)) * 2 * max_cluster
+    i_total = 0
+    for timer_type in ExposureNotificationTimerTypes:
+        for triangulated in [False, True]:
+
+            trackables = {}
+            for cluster_size in range(1, max_cluster + 1):
+                trackables[cluster_size] = run_game(
+                    n_simulation_runs=n_simulation_runs,
+                    cluster_size=cluster_size,
+                    triangulated=triangulated,
+                    timer_type=timer_type
+                )
+                i_total += 1
+                print(f"{i_total}/{n_total}")
+
+                ax.cla()
+                ax.set_title("{} s={} n={} {}".format(
+                    'tri' if triangulated else 'ntri',
+                    cluster_size,
+                    n_simulation_runs,
+                    timer_type.name
+                ))
+
+                data = np.array([
+                    [i+1, t]
+                    for i in range(len(trackables))
+                    for t in trackables[i+1]
+                ])
+                x = data[:,0]
+                y = data[:,1]
+
+                ax.scatter(x=x, y=y)
+                ax.set_xlabel('cluster size')
+                ax.set_ylabel('trackable fraction')
+
+    print('')
+    plt.show()
