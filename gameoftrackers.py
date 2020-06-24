@@ -118,6 +118,8 @@ class TimeSeriesData:
                                         # unique at once - at that point it can be considered a unique
                                         # rotation indirectly carrying over
 
+        action_list = []
+
         for step, mac, rpi, x, y in self.data + [(99999999, None, None)]:
             if not (mac, rpi) is (None, None): # skip processing for last rerun to cleanup deque
 
@@ -133,6 +135,8 @@ class TimeSeriesData:
 
                     g.add_edge((mac, prev_rpi), (mac, rpi))
 
+                    action_list += [(step, 'traverse_rpi', x, y)]
+
                 # direct traversals via mac
                 elif rpi in traversal_lut_rpi:
 
@@ -140,9 +144,13 @@ class TimeSeriesData:
                     del traversal_lut_mac[prev_mac]
                     del traversal_lut_rpi[rpi]
 
+                    action_list += [(step, 'traverse_mac', x, y)]
+
                 # indirect lookup via temporal rotation uniqueness
                 else:
                     temporal_lookahead.append((step, mac, rpi, x, y))
+
+                    action_list += [(step, 'temp_lost', x, y)]
 
             shift_n = 0
 
@@ -157,6 +165,7 @@ class TimeSeriesData:
                     recover_src = (temporal_lookahead[0][1], temporal_lookahead[0][2])
                     recover_dst = (temporal_lookahead[1][1], temporal_lookahead[1][2])
 
+                    action_list += [(step, 'recover_temporal', x, y)]
                 else:
                     # spatial uniqueness
                     x0, y0 = tuple(temporal_lookahead[0][3:5])
@@ -165,6 +174,8 @@ class TimeSeriesData:
                     if abs(x0-x1) >= 2 or abs(y0-y1) >= 2:
                         recover_src = (temporal_lookahead[0][1], temporal_lookahead[0][2])
                         recover_dst = (temporal_lookahead[1][1], temporal_lookahead[1][2])
+
+                        action_list += [(temporal_lookahead[1][0], 'recover_spatial', x1, y1, x0, y0)]
 
                 if not (recover_src is None and recover_dst is None):
 
@@ -177,7 +188,11 @@ class TimeSeriesData:
             # (must be too narrow to neighbor)
             while len(temporal_lookahead) >= shift_n and \
                 (step - temporal_lookahead[shift_n][0]) >= (2 * advertising_interval):
+                
                 shift_n += 1
+
+                x, y = tuple(temporal_lookahead[0][3:5])
+                action_list += [(temporal_lookahead[1][0], 'track_lost', x, y)]
             
             for _ in range(shift_n):
                 temporal_lookahead.popleft()
