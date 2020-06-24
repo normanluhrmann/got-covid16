@@ -369,9 +369,6 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
     model = None
     time_series_data = None
     for _ in range(0, n_simulation_runs):
-        action_list = deque()
-        movement_list = deque()
-
         time_series_data = TimeSeriesData()
         model = DeviceClusterModel(cluster_size,
                                 timer_type=timer_type,
@@ -464,7 +461,6 @@ def render_game(n_frames: int, frame_time_steps: int, cluster_size: int):
                     aidx += 1
                     prev_step = step
 
-    gif_file = tempfile.mktemp(suffix='.gif', prefix='got-animation')
     plt.show()
 
     #
