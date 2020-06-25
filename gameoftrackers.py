@@ -181,8 +181,6 @@ class TimeSeriesData:
                 else:
                     temporal_lookahead.append((step, mac, rpi, x, y))
 
-                    action_list.append((step, 'temp_lost', x, y))
-
                 # save lut for following ref cycles
                 traversal_lut_mac[mac] = rpi
                 traversal_lut_rpi[rpi] = mac
@@ -224,13 +222,13 @@ class TimeSeriesData:
 
                 # lost track on oldest stale items if not already used in processing
                 # (must be too narrow to neighbor)
-                while len(temporal_lookahead) >= shift_n and \
+                while shift_n < len(temporal_lookahead) and \
                     (step - temporal_lookahead[shift_n][0]) >= (2 * advertising_interval):
                     
                     shift_n += 1
 
                     x, y = tuple(temporal_lookahead[0][3:5])
-                    action_list.append((temporal_lookahead[1][0], 'track_lost', x, y))
+                    action_list.append((step, 'track_lost', x, y))
                 
                 for _ in range(shift_n):
                     temporal_lookahead.popleft()
@@ -319,7 +317,7 @@ class ExposureNotificationTimers:
 
     def _advertise(self):
         x, y = self._space_map.locate_agent(self._guid)
-        self._time_series_data.add((self.step, self._mac, self._rpi, x, y))
+        self._time_series_data.add((self._step, self._mac, self._rpi, x, y))
 
 
 class DeviceOwnerAgent(Agent):
@@ -353,6 +351,11 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
     """Run game with parameters, returns trackable fraction of devices per run"""
     assert n_simulation_runs > 0
     assert cluster_size > 0
+
+    global map_movie, action_list, movement_list
+    map_movie = list ()
+    action_list = deque()
+    movement_list = deque()
 
     trackables = []
 
@@ -390,8 +393,6 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
 
 def render_game(n_frames: int, frame_time_steps: int, cluster_size: int):
     """Render game with parameters, returns trackable fraction of devices per run"""
-
-    global map_movie
 
     fig, ax = plt.subplots()
     fig.set_tight_layout(True)
