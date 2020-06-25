@@ -25,6 +25,8 @@ ADVERTISE_GALAXY_S10_MAX = 50
 
 STEP_RESOLUTION_MS = 100
 
+SPATIAL_UNIQ_DIST = 3
+
 # number of steps for 1 square map movement
 MOVEMENT_STEPS_PER_SQUARE = 10
 
@@ -42,6 +44,7 @@ class ExposureNotificationTimerTypes(Enum):
     EXPOSURE_NOTIFICATION_TIMER_ANDROID = 2
     EXPOSURE_NOTIFICATION_TIMER_ANDROID_R = 3
     EXPOSURE_NOTIFICATION_TIMER_ANDROID_R_FIXED = 4
+    EXPOSURE_NOTIFICATION_TIMER_SPEC_FIXED = 5
 
 
 class Map:
@@ -77,7 +80,7 @@ class Map:
         a1x, a1y = self.locate_agent(agent1_id)
         a2x, a2y = self.locate_agent(agent2_id)
 
-        return abs(a1x - a2x) >= 2 or abs(a1y - a2y) >= 2
+        return abs(a1x - a2x) >= SPATIAL_UNIQ_DIST or abs(a1y - a2y) >= SPATIAL_UNIQ_DIST
 
     def locate_agent(self, agent_id):
         """Locate agent by ID"""
@@ -207,7 +210,7 @@ class TimeSeriesData:
                     x0, y0 = tuple(temporal_lookahead[0][3:5])
                     x1, y1 = tuple(temporal_lookahead[1][3:5])
 
-                    if abs(x0-x1) >= 2 or abs(y0-y1) >= 2:
+                    if abs(x0-x1) >= SPATIAL_UNIQ_DIST or abs(y0-y1) >= SPATIAL_UNIQ_DIST:
                         recover_src = (temporal_lookahead[0][1], temporal_lookahead[0][2])
                         recover_dst = (temporal_lookahead[1][1], temporal_lookahead[1][2])
 
@@ -238,10 +241,10 @@ class TimeSeriesData:
                 if prev_action_list_len == len(action_list):
                     break # no action available, break processing
         
-        if len(g.edges) == 0:
+        if len(self.data) == 0:
             return 1.0
         else:
-            return 1.0 - (cluster_size - lost_tracks) / len(g.edges) # 0 edges XXXXX ??
+            return 1.0 - lost_tracks / len(self.data)
 
 
 class ExposureNotificationTimers:
@@ -259,7 +262,8 @@ class ExposureNotificationTimers:
             ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC: ExposureNotificationTimers._gen_EXPOSURE_NOTIFICATION_TIMER_SPEC,
             ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_ANDROID: ExposureNotificationTimers._gen_EXPOSURE_NOTIFICATION_TIMER_ANDROID,
             ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_ANDROID_R: ExposureNotificationTimers._gen_EXPOSURE_NOTIFICATION_TIMER_ANDROID_R,
-            ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_ANDROID_R_FIXED: ExposureNotificationTimers._gen_EXPOSURE_NOTIFICATION_TIMER_ANDROID_R_FIXED
+            ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_ANDROID_R_FIXED: ExposureNotificationTimers._gen_EXPOSURE_NOTIFICATION_TIMER_ANDROID_R_FIXED,
+            ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC_FIXED: ExposureNotificationTimers._gen_EXPOSURE_NOTIFICATION_TIMER_SPEC_FIXED
         }[timer_type](self)
 
     def step(self):
@@ -281,13 +285,13 @@ class ExposureNotificationTimers:
 
     def _gen_EXPOSURE_NOTIFICATION_TIMER_SPEC(self):
         """Generate timers according to Google/Apple spec"""
-        self.mac_rotate_step = random.randrange(0, MAC_ROTATE_STEPS_TOTAL + 1)
+        self.mac_rotate_step = random.randrange(1, MAC_ROTATE_STEPS_TOTAL + 1)
         self.rpi_rotate_step = random.randrange(RPI_ROTATE_STEPS_MIN, RPI_ROTATE_STEPS_MAX + 1)
         self.advertise_step = random.randrange(ADVERTISE_MIN, ADVERTISE_MAX + 1)
 
     def _gen_EXPOSURE_NOTIFICATION_TIMER_ANDROID(self):
         """Generate timers according to observed Android behavior"""
-        self.mac_rotate_step = random.randrange(0, MAC_ROTATE_STEPS_TOTAL + 1)
+        self.mac_rotate_step = random.randrange(1, MAC_ROTATE_STEPS_TOTAL + 1)
         self.rpi_rotate_step = random.randrange(RPI_ROTATE_STEPS_MIN, RPI_ROTATE_STEPS_MAX + 1)
         self.advertise_step = random.randrange(ADVERTISE_GALAXY_S10_MIN, ADVERTISE_GALAXY_S10_MAX + 1)
 
@@ -302,6 +306,13 @@ class ExposureNotificationTimers:
         self.mac_rotate_step = random.randrange(RPI_ROTATE_STEPS_MIN, RPI_ROTATE_STEPS_MAX + 1)
         self.rpi_rotate_step = random.randrange(RPI_ROTATE_STEPS_MIN, RPI_ROTATE_STEPS_MAX + 1)
         self.advertise_step = random.randrange(ADVERTISE_GALAXY_S10_MIN, ADVERTISE_GALAXY_S10_MAX + 1)
+        self.is_fixed = True
+
+    def _gen_EXPOSURE_NOTIFICATION_TIMER_SPEC_FIXED(self):
+        """Generate timers according to Google/Apple spec with dual rotation fixed"""
+        self.mac_rotate_step = random.randrange(1, MAC_ROTATE_STEPS_TOTAL + 1)
+        self.rpi_rotate_step = random.randrange(RPI_ROTATE_STEPS_MIN, RPI_ROTATE_STEPS_MAX + 1)
+        self.advertise_step = random.randrange(ADVERTISE_MIN, ADVERTISE_MAX + 1)
         self.is_fixed = True
 
     def _rotate_mac(self):
@@ -359,7 +370,10 @@ def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, time
 
     trackables = []
 
-    if timer_type == ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC:
+    if timer_type in [
+            ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC,
+            ExposureNotificationTimerTypes.EXPOSURE_NOTIFICATION_TIMER_SPEC_FIXED
+        ]:
         
         advertising_interval = ADVERTISE_MAX
 
@@ -410,7 +424,7 @@ def render_game(n_frames: int, frame_time_steps: int, cluster_size: int):
         if is_event:
             pause_duration = EVENT_DURATION
         else:
-            pause_duration = (step - prev_step) / 10 - EVENT_DURATION
+            pause_duration = max(EVENT_DURATION, (step - prev_step) / 10 - EVENT_DURATION)
 
         plt.pause(pause_duration)
 
@@ -429,7 +443,7 @@ def render_game(n_frames: int, frame_time_steps: int, cluster_size: int):
                     def traverse_rpi(x, y):
                         dmap[x][y] = '*'
                         pass
-                    
+
                     def traverse_mac(x, y):
                         dmap[x][y] = '#'
                         pass
