@@ -141,7 +141,7 @@ class TimeSeriesData:
         self.data += [datum]
 
     def trackable_fraction(self, cluster_size, advertising_interval):
-        """Calculate trackable devices in collected data"""
+        """Follow all trackable devices in collected data and report tracking success"""
         g = nx.DiGraph()
         traversal_lut_mac = {} # lookup rotations with known identifier directly carrying over
         traversal_lut_rpi = {}
@@ -152,7 +152,7 @@ class TimeSeriesData:
                                         # rotation indirectly carrying over
 
         for step, mac, rpi, x, y in self.data + [(99999999, None, None, -1, -1)]:
-            if not (mac, rpi) is (None, None): # skip processing for last rerun to cleanup deque
+            if not (mac, rpi) == (None, None): # skip processing for last rerun to cleanup deque
 
                 if (mac, rpi) not in g.nodes.items():
                     g.add_node((mac, rpi))
@@ -164,9 +164,8 @@ class TimeSeriesData:
                     del traversal_lut_mac[mac]
                     del traversal_lut_rpi[prev_rpi]
 
-                    g.add_edge((mac, prev_rpi), (mac, rpi))
-
                     action_list.append((step, 'traverse_rpi', x, y))
+                    g.add_edge((mac, prev_rpi), (mac, rpi))
 
                 # direct traversals via mac
                 elif rpi in traversal_lut_rpi:
@@ -176,12 +175,17 @@ class TimeSeriesData:
                     del traversal_lut_rpi[rpi]
 
                     action_list.append((step, 'traverse_mac', x, y))
+                    g.add_edge((prev_mac, rpi), (mac, rpi))
 
                 # indirect lookup via temporal rotation uniqueness
                 else:
                     temporal_lookahead.append((step, mac, rpi, x, y))
 
                     action_list.append((step, 'temp_lost', x, y))
+
+                # save lut for following ref cycles
+                traversal_lut_mac[mac] = rpi
+                traversal_lut_rpi[rpi] = mac
 
             shift_n = 0
 
@@ -199,6 +203,7 @@ class TimeSeriesData:
                     recover_dst = (temporal_lookahead[1][1], temporal_lookahead[1][2])
 
                     action_list.append((step, 'recover_temporal', x, y))
+                    g.add_edge(recover_src, recover_dst)
                 else:
                     # spatial uniqueness
                     x0, y0 = tuple(temporal_lookahead[0][3:5])
@@ -209,6 +214,7 @@ class TimeSeriesData:
                         recover_dst = (temporal_lookahead[1][1], temporal_lookahead[1][2])
 
                         action_list.append((temporal_lookahead[1][0], 'recover_spatial', x1, y1, x0, y0))
+                        g.add_edge(recover_src, recover_dst)
 
                 if not (recover_src is None or recover_dst is None):
                     g.add_edge(recover_src, recover_dst)
@@ -233,10 +239,6 @@ class TimeSeriesData:
 
                 if prev_action_list_len == len(action_list):
                     break # no action available, break processing
-
-            # save lut for following ref cycles
-            traversal_lut_mac[mac] = rpi
-            traversal_lut_rpi[rpi] = mac
         
         if len(g.edges) == 0:
             return 1.0
@@ -341,6 +343,10 @@ class DeviceClusterModel(Model):
             timers = ExposureNotificationTimers(timer_type, guid=i, time_series_data=time_series_data, space_map=space_map)
             a = DeviceOwnerAgent(i, model=self, timers=timers)
             self.schedule.add(a)
+
+    def step(self):
+        '''Advance the model by one step.'''
+        self.schedule.step()
 
 
 def run_game(n_simulation_runs: int, cluster_size: int, triangulated: bool, timer_type: ExposureNotificationTimerTypes):
